@@ -244,8 +244,16 @@ mcp:
 # 单元测试
 python -m pytest tests/test_my_security_mcp.py
 
-# 手动测试（启动 MCP Server 并发送测试请求）
+# 手动测试 stdio 接口：直接向 MCP Server 发送 JSON-RPC 请求并验证响应
+# 以下命令测试工具列表接口，期望返回包含 "result" 字段的 JSON-RPC 响应
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | python -m my_security_mcp
+# 预期输出示例（格式为 JSON-RPC 2.0）：
+# {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"my_tool","description":"...","inputSchema":{...}}]}}
+
+# 测试具体工具调用
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"my_tool","arguments":{"param1":"test"}}}' \
+  | python -m my_security_mcp
+# 预期返回包含 "result" 字段，其中 "content" 数组包含 TextContent 类型的 JSON 响应
 ```
 
 ---

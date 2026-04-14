@@ -208,6 +208,7 @@ cat "${SEC_DOCS_BASE_PATH:-/opt/sec-docs}/assets/software-inventory.json"
 
 ```bash
 # 1. 获取本周 CISA KEV 新增条目
+# GNU date (Linux) 使用 -d 参数，BSD date (macOS) 使用 -v 参数；两者依次尝试并取成功结果
 LAST_WEEK=$(date -d "7 days ago" +%Y-%m-%d 2>/dev/null || date -v-7d +%Y-%m-%d)
 curl -s "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json" \
   | python3 -c "

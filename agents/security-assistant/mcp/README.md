@@ -146,7 +146,7 @@ async def call_tool(name: str, arguments: dict):
     async with aiohttp.ClientSession() as session:
         if name == "create_scan":
             payload = {
-                "uuid": "ad629e16-03b6-8c1d-cef6-ef8c9dd3c658d24bd260ef5f9e66",  # Nessus 基础模板 UUID
+                "uuid": "ad629e16-03b6-8c1d-cef6-ef8c9dd3c658d24bd260ef5f9e66",  # Nessus 默认"Basic Network Scan"模板 UUID（各组织实例可能不同，请通过 GET /editor/scan/templates 确认正确的 UUID 后替换）
                 "settings": {
                     "name": arguments["name"],
                     "text_targets": arguments["target"]
