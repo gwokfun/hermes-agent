@@ -1,0 +1,118 @@
+# SecHermes 配置模板
+# 复制为 cli-config.yaml 并按实际环境修改
+
+# =============================================================================
+# 模型配置
+# =============================================================================
+model:
+  # 推荐使用高质量模型以确保安全分析准确性
+  default: "anthropic/claude-opus-4.6"
+  provider: "auto"
+  # 对于高安全性要求场景，可限定只使用特定提供商
+  # provider: "anthropic"
+
+# =============================================================================
+# 智能体身份配置
+# =============================================================================
+agent:
+  # 指定安全助手的 SOUL 文件路径（绝对路径或相对于当前目录）
+  # soul_file 需指向本仓库中的 SOUL.md 或部署后的实际路径
+  # soul_file: "/opt/sechermes/SOUL.md"
+
+  # 禁止智能体自动创建技能（关键安全控制）
+  # 注意：此配置项需要 hermes-agent 支持；当前版本通过 SOUL.md 中的行为规则实现管控
+  auto_skill_creation: false
+
+  # 最大迭代次数（安全操作建议适当限制）
+  max_iterations: 30
+
+# =============================================================================
+# 安全助手专用配置
+# =============================================================================
+security:
+  # 内部安全文档根目录（sec-docs-qa 和 sec-auto-fix 技能使用）
+  docs_base_path: "/opt/sec-docs"
+
+  # 是否强制要求审批（修复操作）
+  approval_required: true
+
+  # 审批超时时间（分钟）
+  approval_timeout_minutes: 30
+
+  # NVD API Key（提高情报查询速率限制，可选）
+  # 注册地址：https://nvd.nist.gov/developers/request-an-api-key
+  # nvd_api_key: "${NVD_API_KEY}"
+
+# =============================================================================
+# MCP Server 配置
+# =============================================================================
+# 取消注释并按实际环境配置
+mcp:
+  servers: []
+  # 漏洞扫描 MCP Server（按实际情况选择一种）
+  #
+  # 方式 1：stdio 模式（本地进程）
+  # - name: vuln-scanner
+  #   command: "python"
+  #   args: ["-m", "vuln_scanner_mcp"]
+  #   env:
+  #     SCANNER_URL: "https://your-nessus-server:8834"
+  #     SCANNER_ACCESS_KEY: "${NESSUS_ACCESS_KEY}"
+  #     SCANNER_SECRET_KEY: "${NESSUS_SECRET_KEY}"
+  #
+  # 方式 2：SSE 模式（已有 HTTP MCP 服务）
+  # - name: vuln-scanner
+  #   url: "http://your-mcp-server:8080/sse"
+  #
+  # 审批 API MCP Server
+  # - name: approval-api
+  #   command: "python"
+  #   args: ["-m", "approval_mcp_server"]
+  #   env:
+  #     APPROVAL_API_URL: "${APPROVAL_API_URL}"
+  #     APPROVAL_API_TOKEN: "${APPROVAL_API_TOKEN}"
+  #
+  # 资产清单 MCP Server（可选）
+  # - name: asset-inventory
+  #   url: "http://your-asset-server:9090/sse"
+
+# =============================================================================
+# 工具配置
+# =============================================================================
+tools:
+  # 启用的工具集（安全助手推荐配置）
+  enabled:
+    - terminal    # 执行扫描命令、查询工具
+    - file        # 读取内部文档
+    - web         # 获取情报（NVD、CISA KEV 等）
+    - mcp         # 连接外部 MCP Server
+  # 禁用不必要的工具以降低风险
+  disabled:
+    - browser     # 如无需要可禁用
+    - code_execution  # 如无需要可禁用
+
+# =============================================================================
+# 显示配置
+# =============================================================================
+display:
+  # 工具执行进度显示（建议开启，便于跟踪操作）
+  tool_progress: true
+
+  # 使用简洁主题
+  skin: "slate"
+
+# =============================================================================
+# 内存配置
+# =============================================================================
+memory:
+  # 建议启用内存，记录扫描历史、漏洞状态等
+  enabled: true
+  provider: "default"
+
+# =============================================================================
+# 日志配置
+# =============================================================================
+# 安全操作建议开启详细日志
+# logging:
+#   level: "INFO"
+#   file: "/var/log/sechermes/agent.log"
