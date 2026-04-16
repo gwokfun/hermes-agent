@@ -196,6 +196,73 @@ def test_prompt_skill_approval_deny_on_keyboard_interrupt(plugin_module):
             assert choice == "deny"
 
 
+def test_prompt_skill_approval_with_clarify_once(plugin_module):
+    """Test approval with clarify callback - choice 'once'"""
+    mock_callback = MagicMock(return_value="Once (approve this skill only)")
+    choice = plugin_module._prompt_skill_approval("test", "A test skill", clarify_callback=mock_callback)
+    assert choice == "once"
+    mock_callback.assert_called_once()
+
+
+def test_prompt_skill_approval_with_clarify_session(plugin_module):
+    """Test approval with clarify callback - choice 'session'"""
+    mock_callback = MagicMock(return_value="Session (approve all skills this session)")
+    choice = plugin_module._prompt_skill_approval("test", "A test skill", clarify_callback=mock_callback)
+    assert choice == "session"
+    mock_callback.assert_called_once()
+
+
+def test_prompt_skill_approval_with_clarify_always(plugin_module):
+    """Test approval with clarify callback - choice 'always'"""
+    mock_callback = MagicMock(return_value="Always (always approve skill creation)")
+    choice = plugin_module._prompt_skill_approval("test", "A test skill", clarify_callback=mock_callback)
+    assert choice == "always"
+    mock_callback.assert_called_once()
+
+
+def test_prompt_skill_approval_with_clarify_deny(plugin_module):
+    """Test approval with clarify callback - choice 'deny'"""
+    mock_callback = MagicMock(return_value="Deny (reject this skill creation)")
+    choice = plugin_module._prompt_skill_approval("test", "A test skill", clarify_callback=mock_callback)
+    assert choice == "deny"
+    mock_callback.assert_called_once()
+
+
+def test_prompt_skill_approval_with_clarify_index_response(plugin_module):
+    """Test approval with clarify callback using numeric index"""
+    # User selects option by index (0 = once, 1 = session, 2 = always, 3 = deny)
+    mock_callback = MagicMock(return_value="1")  # Session
+    choice = plugin_module._prompt_skill_approval("test", "A test skill", clarify_callback=mock_callback)
+    assert choice == "session"
+
+
+def test_prompt_skill_approval_with_clarify_fallback_on_error(plugin_module):
+    """Test that plugin falls back to legacy prompt if clarify callback fails"""
+    mock_callback = MagicMock(side_effect=Exception("Callback error"))
+    with patch.dict(os.environ, {"HERMES_INTERACTIVE": "1"}):
+        with patch("builtins.input", return_value="o"):
+            choice = plugin_module._prompt_skill_approval("test", "A test skill", clarify_callback=mock_callback)
+            assert choice == "once"
+
+
+def test_prompt_skill_approval_with_clarify_includes_metadata(plugin_module):
+    """Test that clarify callback receives skill metadata in the question"""
+    mock_callback = MagicMock(return_value="once")
+    plugin_module._prompt_skill_approval(
+        "my-skill",
+        "A comprehensive test skill",
+        category="testing",
+        clarify_callback=mock_callback
+    )
+
+    # Verify the callback was called with question containing metadata
+    call_args = mock_callback.call_args
+    question = call_args[0][0]
+    assert "my-skill" in question
+    assert "testing" in question
+    assert "comprehensive test skill" in question or "A comprehensive test skill" in question
+
+
 def test_plugin_registration():
     """Test that the plugin registers correctly"""
     from unittest.mock import MagicMock

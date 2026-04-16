@@ -1,19 +1,21 @@
 # Skill Approval Plugin
 
-**需求实现说明：** 本插件满足需求 - 当 hermes-agent 自动创建技能时强制进行审批，需要人为确定是否同意创建。
+**需求实现说明：** 本插件满足需求 - 当 hermes-agent 自动创建技能时强制进行审批，需要人为确定是否同意创建。插件已集成 Hermes 自带的 `clarify` 审批工具，提供统一的交互界面。
 
 ## Overview
 
-This plugin adds a user approval step before the agent creates new skills. When the agent attempts to create a skill using `skill_manage(action='create')`, the user will be prompted to approve or deny the creation.
+This plugin adds a user approval step before the agent creates new skills. When the agent attempts to create a skill using `skill_manage(action='create')`, the user will be prompted to approve or deny the creation using Hermes' built-in `clarify` tool.
 
 ## Features
 
 - ✅ **Interactive Approval**: User must explicitly approve skill creation
+- ✅ **Clarify Integration**: Uses Hermes' built-in `clarify` tool for consistent UX
 - ✅ **Session-scoped Approvals**: Approve once for the entire conversation
 - ✅ **Permanent Approvals**: Always approve skill creation (bypass future prompts)
 - ✅ **Configurable**: Can be disabled or set to auto-approve mode
-- ✅ **CLI Support**: Interactive prompts in terminal
-- ⚠️ **Gateway Support**: Async approval for messaging platforms (planned)
+- ✅ **CLI Support**: Interactive prompts in terminal via clarify callback
+- ✅ **Gateway Support**: Works with messaging platforms that support clarify
+- ✅ **Fallback**: Legacy direct prompt support for environments without clarify
 
 ## Installation
 
@@ -31,19 +33,27 @@ plugins:
 
 ## Usage
 
-When enabled, the plugin intercepts all skill creation attempts. The user will see a prompt like:
+When enabled, the plugin intercepts all skill creation attempts. The user will see a clarify-powered prompt like:
 
 ```
-📚 SKILL CREATION REQUEST
-    Name: my-new-skill
-    Category: devops
-    Description: A skill for managing Docker containers
+📚 Skill creation request: 'my-new-skill' (category: devops)
 
-    Allow the agent to create this skill?
-    [o]nce  |  [s]ession  |  [a]lways  |  [d]eny
+Description: A skill for managing Docker containers
 
-    Choice [o/s/a/D]:
+Allow the agent to create this skill?
+
+1. Once (approve this skill only)
+2. Session (approve all skills this session)
+3. Always (always approve skill creation)
+4. Deny (reject this skill creation)
+5. Other (type your answer)
 ```
+
+The clarify tool provides an interactive selection interface:
+- **CLI**: Arrow keys to navigate, Enter to select, or type a custom response
+- **Gateway**: Numbered list for easy selection in messaging apps
+
+If the clarify callback is not available, the plugin falls back to a legacy direct input prompt.
 
 ### Approval Options
 

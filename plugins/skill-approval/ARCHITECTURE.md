@@ -2,22 +2,24 @@
 
 ## Overview
 
-This plugin implements a user approval workflow for skill creation in hermes-agent. It intercepts skill creation attempts via the `pre_tool_call` hook and prompts the user for approval before allowing the skill to be created.
+This plugin implements a user approval workflow for skill creation in hermes-agent. It intercepts skill creation attempts via the `pre_tool_call` hook and prompts the user for approval before allowing the skill to be created. The plugin integrates with Hermes' built-in `clarify` tool to provide a consistent, interactive approval experience across CLI and messaging platforms.
 
 ## Problem Statement (需求)
 
-**中文需求：** 当前 hermes-agent 自动创建技能时需要强制进行审批，需要进行人为确定是否同意创建。
+**中文需求：** 当前 hermes-agent 自动创建技能时需要强制进行审批，需要进行人为确定是否同意创建。插件已集成 Hermes 自带的 `clarify` 审批工具。
 
-**English:** When hermes-agent automatically creates skills, a mandatory approval process is required where a human must confirm whether to allow the creation.
+**English:** When hermes-agent automatically creates skills, a mandatory approval process is required where a human must confirm whether to allow the creation. The plugin now integrates with Hermes' built-in `clarify` approval tool.
 
 ## Solution
 
 This plugin solves the problem by:
 
 1. **Intercepting skill creation** via the `pre_tool_call` hook
-2. **Prompting the user** for approval before creation proceeds
-3. **Blocking unauthorized creation** if the user denies
-4. **Supporting session-scoped approvals** to avoid repeated prompts
+2. **Using the clarify callback** for consistent interactive prompts when available
+3. **Prompting the user** for approval before creation proceeds
+4. **Blocking unauthorized creation** if the user denies
+5. **Supporting session-scoped approvals** to avoid repeated prompts
+6. **Falling back to legacy prompts** when clarify is not available
 
 ## Technical Architecture
 
@@ -157,26 +159,41 @@ def pre_tool_call(tool_name: str, tool_args: dict, **kwargs) -> Optional[Dict]:
 
 ### 3. User Prompt (CLI)
 
+The plugin now uses the `clarify` callback when available for a consistent UX:
+
 ```python
-def _prompt_skill_approval(skill_name: str, description: str, category: str):
+def _prompt_skill_approval(skill_name: str, description: str, category: str, clarify_callback=None):
+    # If clarify callback is available, use it
+    if clarify_callback:
+        question = f"📚 Skill creation request: '{skill_name}'"
+        if category:
+            question += f" (category: {category})"
+        if description:
+            desc_preview = description[:150] + "..." if len(description) > 150 else description
+            question += f"\n\nDescription: {desc_preview}"
+        question += "\n\nAllow the agent to create this skill?"
+
+        choices = [
+            "Once (approve this skill only)",
+            "Session (approve all skills this session)",
+            "Always (always approve skill creation)",
+            "Deny (reject this skill creation)"
+        ]
+
+        response = clarify_callback(question, choices)
+        # Parse response...
+        return "once" | "session" | "always" | "deny"
+
+    # Fall back to legacy CLI prompt
     print(f"📚 SKILL CREATION REQUEST")
-    print(f"    Name: {skill_name}")
-    print(f"    Category: {category}")
-    print(f"    Description: {description}")
-    print()
-    print("    [o]nce  |  [s]ession  |  [a]lways  |  [d]eny")
-
-    choice = input("    Choice [o/s/a/D]: ").strip().lower()
-
-    if choice in ('o', 'once'):
-        return "once"
-    elif choice in ('s', 'session'):
-        return "session"
-    elif choice in ('a', 'always'):
-        return "always"
-    else:
-        return "deny"
+    # ... legacy input() prompt
 ```
+
+**Clarify Integration Benefits:**
+- **Consistent UX**: Same interactive interface as other approval prompts
+- **Platform Support**: Works in CLI (arrow keys) and gateway (numbered list)
+- **Better Formatting**: Rich question with metadata, clear multiple-choice options
+- **Graceful Fallback**: Legacy prompt when clarify callback unavailable
 
 ## Comparison with Existing Approval System
 
@@ -185,11 +202,44 @@ The skill approval plugin follows the same patterns as the dangerous command app
 | Feature | Dangerous Commands | Skill Approval |
 |---------|-------------------|----------------|
 | Hook Used | `pre_tool_call` (terminal) | `pre_tool_call` (skill_manage) |
+| Approval Interface | Custom approval_callback | `clarify` callback |
 | Approval Scopes | once/session/always | once/session/always |
-| CLI Support | ✓ Interactive prompts | ✓ Interactive prompts |
-| Gateway Support | ✓ Async blocking queue | ⚠️ Planned (not implemented) |
+| CLI Support | ✓ Interactive prompts | ✓ Interactive prompts (via clarify) |
+| Gateway Support | ✓ Async blocking queue | ✓ Works via clarify callback |
 | Persistence | Config YAML allowlist | In-memory only |
 | YOLO Bypass | `HERMES_YOLO_MODE` | `HERMES_SKILL_APPROVAL_YOLO` |
+
+## Hook Result Checking (Critical Fix)
+
+**Important:** This plugin requires the `pre_tool_call` hook results to be checked in `model_tools.py`. The initial implementation had a bug where hook results were ignored.
+
+**Fixed implementation in model_tools.py:**
+```python
+try:
+    from hermes_cli.plugins import invoke_hook
+    hook_results = invoke_hook(
+        "pre_tool_call",
+        tool_name=function_name,
+        args=function_args,
+        task_id=task_id or "",
+        session_id=session_id or "",
+        tool_call_id=tool_call_id or "",
+        clarify_callback=clarify_callback,  # Pass callback to hooks
+    )
+    # Check if any hook blocked the tool call
+    for result in hook_results:
+        if result and isinstance(result, dict) and result.get("block"):
+            return result.get("result", json.dumps({"error": "Tool call blocked by plugin"}))
+except Exception:
+    pass
+```
+
+**What changed:**
+1. ✅ Capture return value from `invoke_hook()`
+2. ✅ Check each result for `block=True`
+3. ✅ Return the plugin's error result immediately if blocked
+4. ✅ Pass `clarify_callback` to hooks for interactive prompts
+5. ✅ Added `clarify_callback` parameter to `handle_function_call()` signature
 
 ## Configuration
 
