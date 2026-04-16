@@ -1,0 +1,6 @@
+name: skill-approval
+version: 1.0.0
+description: Require user approval before the agent creates new skills
+author: Hermes Team
+provides_hooks:
+  - pre_tool_call
