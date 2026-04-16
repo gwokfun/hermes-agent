@@ -82,17 +82,59 @@ def _approve_permanent() -> None:
         _permanent_approval = True
 
 
-def _prompt_skill_approval(skill_name: str, description: str, category: str = None) -> str:
+def _prompt_skill_approval(skill_name: str, description: str, category: str = None, clarify_callback=None) -> str:
     """Prompt the user to approve skill creation.
 
     Args:
         skill_name: Name of the skill to create
         description: Description from frontmatter
         category: Optional category
+        clarify_callback: Optional clarify callback function for interactive prompts
 
     Returns:
         'once', 'session', 'always', or 'deny'
     """
+    # If clarify callback is available, use it for a better UX
+    if clarify_callback:
+        try:
+            question = f"📚 Skill creation request: '{skill_name}'"
+            if category:
+                question += f" (category: {category})"
+            if description:
+                # Truncate long descriptions
+                desc_preview = description[:150] + "..." if len(description) > 150 else description
+                question += f"\n\nDescription: {desc_preview}"
+            question += "\n\nAllow the agent to create this skill?"
+
+            choices = [
+                "Once (approve this skill only)",
+                "Session (approve all skills this session)",
+                "Always (always approve skill creation)",
+                "Deny (reject this skill creation)"
+            ]
+
+            response = clarify_callback(question, choices)
+
+            # Parse the response
+            if response and isinstance(response, str):
+                response_lower = response.lower()
+                if "once" in response_lower or response_lower.startswith("0") or "approve this" in response_lower:
+                    print("      ✓ Skill creation allowed once")
+                    return "once"
+                elif "session" in response_lower or response_lower.startswith("1") or "all skills" in response_lower:
+                    print("      ✓ Skill creation allowed for this session")
+                    return "session"
+                elif "always" in response_lower or response_lower.startswith("2") or "always approve" in response_lower:
+                    print("      ✓ Skill creation always allowed")
+                    return "always"
+            # Default to deny if unclear
+            print("      ✗ Skill creation denied")
+            return "deny"
+        except Exception as e:
+            logger.warning(f"Error using clarify callback: {e}, falling back to direct prompt")
+            # Fall through to legacy prompt
+
+    # Legacy prompt for CLI/gateway without clarify support
     is_cli = os.environ.get("HERMES_INTERACTIVE")
     is_gateway = os.environ.get("HERMES_GATEWAY_SESSION")
 
@@ -201,7 +243,7 @@ def pre_tool_call(tool_name: str, tool_args: dict, **kwargs: Any) -> Optional[Di
     Args:
         tool_name: Name of the tool being called
         tool_args: Arguments passed to the tool
-        **kwargs: Additional context (task_id, session, etc.)
+        **kwargs: Additional context (task_id, session, clarify_callback, etc.)
 
     Returns:
         None to allow the tool to proceed, or a dict with:
@@ -242,8 +284,11 @@ def pre_tool_call(tool_name: str, tool_args: dict, **kwargs: Any) -> Optional[Di
     # Extract skill metadata for prompt
     skill_name, description, category = _extract_skill_metadata(tool_args)
 
+    # Get clarify callback from kwargs if available
+    clarify_callback = kwargs.get("clarify_callback")
+
     # Prompt for approval
-    choice = _prompt_skill_approval(skill_name, description, category)
+    choice = _prompt_skill_approval(skill_name, description, category, clarify_callback)
 
     # Handle denial
     if choice == "deny":

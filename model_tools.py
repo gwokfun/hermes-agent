@@ -464,6 +464,7 @@ def handle_function_call(
     session_id: Optional[str] = None,
     user_task: Optional[str] = None,
     enabled_tools: Optional[List[str]] = None,
+    clarify_callback: Optional[callable] = None,
 ) -> str:
     """
     Main function call dispatcher that routes calls to the tool registry.
@@ -499,14 +500,19 @@ def handle_function_call(
 
         try:
             from hermes_cli.plugins import invoke_hook
-            invoke_hook(
+            hook_results = invoke_hook(
                 "pre_tool_call",
                 tool_name=function_name,
                 args=function_args,
                 task_id=task_id or "",
                 session_id=session_id or "",
                 tool_call_id=tool_call_id or "",
+                clarify_callback=clarify_callback,
             )
+            # Check if any hook blocked the tool call
+            for result in hook_results:
+                if result and isinstance(result, dict) and result.get("block"):
+                    return result.get("result", json.dumps({"error": "Tool call blocked by plugin"}))
         except Exception:
             pass
 
