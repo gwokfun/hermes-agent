@@ -540,13 +540,6 @@ class AIAgent:
     for AI models that support function calling.
     """
 
-    # ── Class-level context pressure dedup (survives across instances) ──
-    # The gateway creates a new AIAgent per message, so instance-level flags
-    # reset every time.  This dict tracks {session_id: (warn_level, timestamp)}
-    # to suppress duplicate warnings within a cooldown window.
-    _context_pressure_last_warned: dict = {}
-    _CONTEXT_PRESSURE_COOLDOWN = 300  # seconds between re-warning same session
-
     @property
     def base_url(self) -> str:
         return self._base_url
@@ -648,6 +641,9 @@ class AIAgent:
             prefill_messages (List[Dict]): Messages to prepend to conversation history as prefilled context.
                 Useful for injecting a few-shot example or priming the model's response style.
                 Example: [{"role": "user", "content": "Hi!"}, {"role": "assistant", "content": "Hello!"}]
+                NOTE: Anthropic Sonnet 4.6+ and Opus 4.6+ reject a conversation that ends on an
+                assistant-role message (400 error).  For those models use structured outputs or
+                output_config.format instead of a trailing-assistant prefill.
             platform (str): The interface platform the user is on (e.g. "cli", "telegram", "discord", "whatsapp").
                 Used to inject platform-specific formatting hints into the system prompt.
             skip_context_files (bool): If True, skip auto-injection of SOUL.md, AGENTS.md, and .cursorrules
@@ -825,12 +821,6 @@ class AIAgent:
         # models to "give up" prematurely on complex tasks (#7915).
         self._budget_exhausted_injected = False
         self._budget_grace_call = False
-
-        # Context pressure warnings: notify the USER (not the LLM) as context
-        # fills up.  Purely informational — displayed in CLI output and sent via
-        # status_callback for gateway platforms.  Does NOT inject into messages.
-        # Tiered: fires at 85% and again at 95% of compaction threshold.
-        self._context_pressure_warned_at = 0.0  # highest tier already shown
 
         # Activity tracking — updated on each API call, tool execution, and
         # stream chunk.  Used by the gateway timeout handler to report what the
@@ -1684,11 +1674,25 @@ class AIAgent:
         turn-scoped).
         """
         import logging
+        import re as _re
         from hermes_cli.providers import determine_api_mode
 
         # ── Determine api_mode if not provided ──
         if not api_mode:
             api_mode = determine_api_mode(new_provider, base_url)
+
+        # Defense-in-depth: ensure OpenCode base_url doesn't carry a trailing
+        # /v1 into the anthropic_messages client, which would cause the SDK to
+        # hit /v1/v1/messages.  `model_switch.switch_model()` already strips
+        # this, but we guard here so any direct callers (future code paths,
+        # tests) can't reintroduce the double-/v1 404 bug.
+        if (
+            api_mode == "anthropic_messages"
+            and new_provider in ("opencode-zen", "opencode-go")
+            and isinstance(base_url, str)
+            and base_url
+        ):
+            base_url = _re.sub(r"/v1/?$", "", base_url)
 
         old_model = self.model
         old_provider = self.provider
@@ -4353,6 +4357,15 @@ class AIAgent:
 
     def _create_openai_client(self, client_kwargs: dict, *, reason: str, shared: bool) -> Any:
         from agent.auxiliary_client import _validate_base_url, _validate_proxy_env_urls
+        # Treat client_kwargs as read-only. Callers pass self._client_kwargs (or shallow
+        # copies of it) in; any in-place mutation leaks back into the stored dict and is
+        # reused on subsequent requests. #10933 hit this by injecting an httpx.Client
+        # transport that was torn down after the first request, so the next request
+        # wrapped a closed transport and raised "Cannot send a request, as the client
+        # has been closed" on every retry. The revert resolved that specific path; this
+        # copy locks the contract so future transport/keepalive work can't reintroduce
+        # the same class of bug.
+        client_kwargs = dict(client_kwargs)
         _validate_proxy_env_urls()
         _validate_base_url(client_kwargs.get("base_url"))
         if self.provider == "copilot-acp" or str(client_kwargs.get("base_url", "")).startswith("acp://copilot"):
@@ -4366,11 +4379,39 @@ class AIAgent:
                 self._client_log_context(),
             )
             return client
-        # Inject TCP keepalives to detect dead connections faster (#10324).
-        # Without keepalives, a provider that drops mid-stream leaves the
-        # socket in CLOSE-WAIT and epoll_wait may never fire, causing the
-        # agent to hang indefinitely.  Keepalive probes detect the dead
-        # peer within ~60s (30s idle + 3×10s probes).
+        if self.provider == "google-gemini-cli" or str(client_kwargs.get("base_url", "")).startswith("cloudcode-pa://"):
+            from agent.gemini_cloudcode_adapter import GeminiCloudCodeClient
+
+            # Strip OpenAI-specific kwargs the Gemini client doesn't accept
+            safe_kwargs = {
+                k: v for k, v in client_kwargs.items()
+                if k in {"api_key", "base_url", "default_headers", "project_id", "timeout"}
+            }
+            client = GeminiCloudCodeClient(**safe_kwargs)
+            logger.info(
+                "Gemini Cloud Code Assist client created (%s, shared=%s) %s",
+                reason,
+                shared,
+                self._client_log_context(),
+            )
+            return client
+        # Inject TCP keepalives so the kernel detects dead provider connections
+        # instead of letting them sit silently in CLOSE-WAIT (#10324).  Without
+        # this, a peer that drops mid-stream leaves the socket in a state where
+        # epoll_wait never fires, ``httpx`` read timeout may not trigger, and
+        # the agent hangs until manually killed.  Probes after 30s idle, retry
+        # every 10s, give up after 3 → dead peer detected within ~60s.
+        #
+        # Safety against #10933: the ``client_kwargs = dict(client_kwargs)``
+        # above means this injection only lands in the local per-call copy,
+        # never back into ``self._client_kwargs``.  Each ``_create_openai_client``
+        # invocation therefore gets its OWN fresh ``httpx.Client`` whose
+        # lifetime is tied to the OpenAI client it is passed to.  When the
+        # OpenAI client is closed (rebuild, teardown, credential rotation),
+        # the paired ``httpx.Client`` closes with it, and the next call
+        # constructs a fresh one — no stale closed transport can be reused.
+        # Tests in ``tests/run_agent/test_create_openai_client_reuse.py`` and
+        # ``tests/run_agent/test_sequential_chats_live.py`` pin this invariant.
         if "http_client" not in client_kwargs:
             try:
                 import httpx as _httpx
@@ -7243,20 +7284,6 @@ class AIAgent:
         self.context_compressor.last_prompt_tokens = _compressed_est
         self.context_compressor.last_completion_tokens = 0
 
-        # Only reset the pressure warning if compression actually brought
-        # us below the warning level (85% of threshold).  When compression
-        # can't reduce enough (e.g. threshold is very low, or system prompt
-        # alone exceeds the warning level), keep the tier set to prevent
-        # spamming the user with repeated warnings every loop iteration.
-        if self.context_compressor.threshold_tokens > 0:
-            _post_progress = _compressed_est / self.context_compressor.threshold_tokens
-            if _post_progress < 0.85:
-                self._context_pressure_warned_at = 0.0
-                # Clear class-level dedup for this session so a fresh
-                # warning cycle can start if context grows again.
-                _sid = self.session_id or "default"
-                AIAgent._context_pressure_last_warned.pop(_sid, None)
-
         # Clear the file-read dedup cache.  After compression the original
         # read content is summarised away — if the model re-reads the same
         # file it needs the full content, not a "file unchanged" stub.
@@ -7549,24 +7576,50 @@ class AIAgent:
 
                 # Wait for all to complete with periodic heartbeats so the
                 # gateway's inactivity monitor doesn't kill us during long
-                # concurrent tool batches.
+                # concurrent tool batches.  Also check for user interrupts
+                # so we don't block indefinitely when the user sends /stop
+                # or a new message during concurrent tool execution.
                 _conc_start = time.time()
+                _interrupt_logged = False
                 while True:
                     done, not_done = concurrent.futures.wait(
-                        futures, timeout=30.0,
+                        futures, timeout=5.0,
                     )
                     if not not_done:
                         break
+
+                    # Check for interrupt — the per-thread interrupt signal
+                    # already causes individual tools (terminal, execute_code)
+                    # to abort, but tools without interrupt checks (web_search,
+                    # read_file) will run to completion.  Cancel any futures
+                    # that haven't started yet so we don't block on them.
+                    if self._interrupt_requested:
+                        if not _interrupt_logged:
+                            _interrupt_logged = True
+                            self._vprint(
+                                f"{self.log_prefix}⚡ Interrupt: cancelling "
+                                f"{len(not_done)} pending concurrent tool(s)",
+                                force=True,
+                            )
+                        for f in not_done:
+                            f.cancel()
+                        # Give already-running tools a moment to notice the
+                        # per-thread interrupt signal and exit gracefully.
+                        concurrent.futures.wait(not_done, timeout=3.0)
+                        break
+
                     _conc_elapsed = int(time.time() - _conc_start)
-                    _still_running = [
-                        parsed_calls[futures.index(f)][1]
-                        for f in not_done
-                        if f in futures
-                    ]
-                    self._touch_activity(
-                        f"concurrent tools running ({_conc_elapsed}s, "
-                        f"{len(not_done)} remaining: {', '.join(_still_running[:3])})"
-                    )
+                    # Heartbeat every ~30s (6 × 5s poll intervals)
+                    if _conc_elapsed > 0 and _conc_elapsed % 30 < 6:
+                        _still_running = [
+                            parsed_calls[futures.index(f)][1]
+                            for f in not_done
+                            if f in futures
+                        ]
+                        self._touch_activity(
+                            f"concurrent tools running ({_conc_elapsed}s, "
+                            f"{len(not_done)} remaining: {', '.join(_still_running[:3])})"
+                        )
         finally:
             if spinner:
                 # Build a summary message for the spinner stop
@@ -7578,8 +7631,11 @@ class AIAgent:
         for i, (tc, name, args) in enumerate(parsed_calls):
             r = results[i]
             if r is None:
-                # Shouldn't happen, but safety fallback
-                function_result = f"Error executing tool '{name}': thread did not return a result"
+                # Tool was cancelled (interrupt) or thread didn't return
+                if self._interrupt_requested:
+                    function_result = f"[Tool execution cancelled — {name} was skipped due to user interrupt]"
+                else:
+                    function_result = f"Error executing tool '{name}': thread did not return a result"
                 tool_duration = 0.0
             else:
                 function_name, function_args, function_result, tool_duration, is_error = r
@@ -8026,45 +8082,6 @@ class AIAgent:
             enforce_turn_budget(messages[-num_tools_seq:], env=get_active_env(effective_task_id))
 
 
-
-    def _emit_context_pressure(self, compaction_progress: float, compressor) -> None:
-        """Notify the user that context is approaching the compaction threshold.
-
-        Args:
-            compaction_progress: How close to compaction (0.0–1.0, where 1.0 = fires).
-            compressor: The ContextCompressor instance (for threshold/context info).
-
-        Purely user-facing — does NOT modify the message stream.
-        For CLI: prints a formatted line with a progress bar.
-        For gateway: fires status_callback so the platform can send a chat message.
-        """
-        from agent.display import format_context_pressure, format_context_pressure_gateway
-
-        threshold_pct = compressor.threshold_tokens / compressor.context_length if compressor.context_length else 0.5
-
-        # CLI output — always shown (these are user-facing status notifications,
-        # not verbose debug output, so they bypass quiet_mode).
-        # Gateway users also get the callback below.
-        if self.platform in (None, "cli"):
-            line = format_context_pressure(
-                compaction_progress=compaction_progress,
-                threshold_tokens=compressor.threshold_tokens,
-                threshold_percent=threshold_pct,
-                compression_enabled=self.compression_enabled,
-            )
-            self._safe_print(line)
-
-        # Gateway / external consumers
-        if self.status_callback:
-            try:
-                msg = format_context_pressure_gateway(
-                    compaction_progress=compaction_progress,
-                    threshold_percent=threshold_pct,
-                    compression_enabled=self.compression_enabled,
-                )
-                self.status_callback("context_pressure", msg)
-            except Exception:
-                logger.debug("status_callback error in context pressure", exc_info=True)
 
     def _handle_max_iterations(self, messages: list, api_call_count: int) -> str:
         """Request a summary when max iterations are reached. Returns the final response text."""
@@ -10786,38 +10803,6 @@ class AIAgent:
                     else:
                         _real_tokens = estimate_messages_tokens_rough(messages)
 
-                    # ── Context pressure warnings (user-facing only) ──────────
-                    # Notify the user (NOT the LLM) as context approaches the
-                    # compaction threshold.  Thresholds are relative to where
-                    # compaction fires, not the raw context window.
-                    # Does not inject into messages — just prints to CLI output
-                    # and fires status_callback for gateway platforms.
-                    # Tiered: 85% (orange) and 95% (red/critical).
-                    if _compressor.threshold_tokens > 0:
-                        _compaction_progress = _real_tokens / _compressor.threshold_tokens
-                        # Determine the warning tier for this progress level
-                        _warn_tier = 0.0
-                        if _compaction_progress >= 0.95:
-                            _warn_tier = 0.95
-                        elif _compaction_progress >= 0.85:
-                            _warn_tier = 0.85
-                        if _warn_tier > self._context_pressure_warned_at:
-                            # Class-level dedup: check if this session was already
-                            # warned at this tier within the cooldown window.
-                            _sid = self.session_id or "default"
-                            _last = AIAgent._context_pressure_last_warned.get(_sid)
-                            _now = time.time()
-                            if _last is None or _last[0] < _warn_tier or (_now - _last[1]) >= self._CONTEXT_PRESSURE_COOLDOWN:
-                                self._context_pressure_warned_at = _warn_tier
-                                AIAgent._context_pressure_last_warned[_sid] = (_warn_tier, _now)
-                                self._emit_context_pressure(_compaction_progress, _compressor)
-                                # Evict stale entries (older than 2x cooldown)
-                                _cutoff = _now - self._CONTEXT_PRESSURE_COOLDOWN * 2
-                                AIAgent._context_pressure_last_warned = {
-                                    k: v for k, v in AIAgent._context_pressure_last_warned.items()
-                                    if v[1] > _cutoff
-                                }
-
                     if self.compression_enabled and _compressor.should_compress(_real_tokens):
                         self._safe_print("  ⟳ compacting context…")
                         messages, active_system_prompt = self._compress_context(
@@ -10939,8 +10924,9 @@ class AIAgent:
                             #   tool(result) → assistant("(empty)") → user(nudge)
                             # Without this, we'd have tool → user which most
                             # APIs reject as an invalid sequence.
-                            assistant_msg["content"] = "(empty)"
-                            messages.append(assistant_msg)
+                            _nudge_msg = self._build_assistant_message(assistant_message, finish_reason)
+                            _nudge_msg["content"] = "(empty)"
+                            messages.append(_nudge_msg)
                             messages.append({
                                 "role": "user",
                                 "content": (
