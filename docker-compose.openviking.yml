@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  # OpenViking context database service
+  # This service runs the OpenViking server alongside Hermes Agent
+  openviking:
+    image: volcengine/openviking:latest
+    container_name: hermes-openviking
+    restart: unless-stopped
+    ports:
+      - "1933:1933"  # OpenViking API port
+    volumes:
+      - openviking-data:/root/.openviking
+      - ./openviking-config:/config
+    environment:
+      # OpenViking configuration
+      - OPENVIKING_HOST=0.0.0.0
+      - OPENVIKING_PORT=1933
+      # Embedding model configuration
+      - OPENVIKING_EMBEDDING_MODEL=${OPENVIKING_EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      - OPENVIKING_EMBEDDING_DEVICE=${OPENVIKING_EMBEDDING_DEVICE:-cpu}
+      # VLM (Vision Language Model) configuration
+      - OPENVIKING_VLM_MODEL=${OPENVIKING_VLM_MODEL:-Qwen/Qwen2-VL-2B-Instruct}
+      - OPENVIKING_VLM_DEVICE=${OPENVIKING_VLM_DEVICE:-cpu}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:1933/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - hermes-network
+
+  # Hermes Agent with OpenViking integration
+  hermes:
+    extends:
+      file: docker-compose.yml
+      service: hermes
+    environment:
+      # OpenViking connection settings
+      - OPENVIKING_ENDPOINT=http://openviking:1933
+      - OPENVIKING_API_KEY=${OPENVIKING_API_KEY:-}
+      - OPENVIKING_ACCOUNT=${OPENVIKING_ACCOUNT:-default}
+      - OPENVIKING_USER=${OPENVIKING_USER:-default}
+      - OPENVIKING_AGENT=${OPENVIKING_AGENT:-hermes}
+    depends_on:
+      openviking:
+        condition: service_healthy
+    networks:
+      - hermes-network
+
+volumes:
+  openviking-data:
+    driver: local
+
+networks:
+  hermes-network:
+    driver: bridge

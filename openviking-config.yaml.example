@@ -1,0 +1,189 @@
+# Hermes Agent Configuration with OpenViking Memory Plugin
+# =========================================================
+# This is a pre-configured template for using Hermes Agent with OpenViking
+# context database for advanced memory management.
+#
+# Usage:
+#   cp openviking-config.yaml.example ~/.hermes/config.yaml
+#   Edit the values below as needed
+#   Run: hermes memory setup (select openviking)
+
+# Memory Provider Configuration
+# -----------------------------
+memory:
+  # Set to 'openviking' to enable OpenViking memory plugin
+  # Leave empty or set to '' for built-in memory only (MEMORY.md/USER.md)
+  provider: openviking
+
+  # OpenViking-specific settings (optional, mostly via environment variables)
+  openviking:
+    # These settings override environment variables if set
+    # Leave commented to use .env configuration
+    # endpoint: http://127.0.0.1:1933
+    # account: default
+    # user: default
+    # agent: hermes
+
+# Core Hermes Agent Configuration
+# --------------------------------
+# Model provider and API settings
+model:
+  provider: anthropic  # or: openai, openrouter, etc.
+  name: claude-sonnet-4.5
+  # api_key configured in .env
+
+# Agent behavior
+agent:
+  max_iterations: 90
+  quiet_mode: false
+  save_trajectories: false
+
+  # Memory settings
+  memory_nudge_interval: 15  # Prompt to save memories every N messages
+  auto_memory: true          # Automatically suggest memories
+
+# Terminal environment
+terminal:
+  environment: local  # or: docker, ssh, modal, daytona, singularity
+
+  # Docker backend (if using terminal.environment: docker)
+  docker:
+    image: hermes-agent:latest
+    auto_pull: false
+
+# Display settings
+display:
+  tool_previews: true
+  streaming: true
+  spinner: kawaii
+  skin: default  # or: ares, mono, slate, cyberpunk
+
+  # Tool progress in messaging platforms
+  tool_progress_command: false  # Set true to enable /tool command
+  background_process_notifications: all  # all, result, error, off
+
+# Messaging gateway
+gateway:
+  platforms:
+    telegram:
+      enabled: false  # Set to true and configure TELEGRAM_BOT_TOKEN in .env
+    discord:
+      enabled: false  # Set to true and configure DISCORD_BOT_TOKEN in .env
+    slack:
+      enabled: false  # Set to true and configure SLACK_* vars in .env
+
+  # Working directory for messaging commands
+  working_directory: ~
+
+# Tools and capabilities
+tools:
+  # Core toolsets
+  core: true
+  filesystem: true
+  terminal: true
+  web: true
+
+  # Optional toolsets
+  browser: false       # Requires BROWSERBASE_API_KEY
+  code_execution: true
+  delegation: true
+  image_generation: false  # Requires FAL_KEY
+
+  # Tool-specific settings
+  approval:
+    enabled: true
+    dangerous_commands:
+      - rm -rf
+      - dd if=
+      - mkfs
+      - iptables
+
+  web:
+    provider: parallel  # or: firecrawl
+
+# Skills system
+skills:
+  enabled: true
+  auto_create: true      # Create skills after complex tasks
+  auto_improve: true     # Improve skills during use
+
+# Cron scheduler
+cron:
+  enabled: false
+  jobs_file: ~/.hermes/cron/jobs.yaml
+
+# Personality/SOUL
+personality:
+  file: ~/.hermes/SOUL.md
+
+# Session management
+sessions:
+  # Session search with LLM summarization
+  search_enabled: true
+  summary_model: claude-haiku  # Lightweight model for summaries
+
+  # Context compression
+  auto_compress: true
+  compression_threshold: 0.8  # Compress when context is 80% full
+
+# Security
+security:
+  # Command approval for dangerous operations
+  require_approval: true
+
+  # Sandbox mode for terminal
+  sandbox: false
+
+# Logging
+logging:
+  level: INFO  # DEBUG, INFO, WARNING, ERROR
+  file: ~/.hermes/logs/hermes.log
+
+# Advanced
+advanced:
+  # Prompt caching (Anthropic)
+  prompt_caching: true
+
+  # Context optimization
+  context_files: true
+  context_files_path: .hermes-context/
+
+  # Auxiliary client for vision/summarization
+  auxiliary_client:
+    enabled: true
+    model: claude-haiku
+
+  # Models.dev integration
+  models_dev:
+    enabled: true
+    registry_url: https://models.dev/api/v1
+
+# =========================================================
+# Environment Variables (.env)
+# =========================================================
+# The following should be configured in ~/.hermes/.env:
+#
+# Core API Keys:
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   OPENAI_API_KEY=sk-...
+#   OPENROUTER_API_KEY=sk-or-...
+#
+# OpenViking Configuration:
+#   OPENVIKING_ENDPOINT=http://127.0.0.1:1933
+#   OPENVIKING_API_KEY=          # Optional
+#   OPENVIKING_ACCOUNT=default
+#   OPENVIKING_USER=default
+#   OPENVIKING_AGENT=hermes
+#   OPENVIKING_EMBEDDING_MODEL=BAAI/bge-small-zh-v1.5
+#   OPENVIKING_EMBEDDING_DEVICE=cpu
+#   OPENVIKING_VLM_MODEL=Qwen/Qwen2-VL-2B-Instruct
+#   OPENVIKING_VLM_DEVICE=cpu
+#
+# Optional Services:
+#   BROWSERBASE_API_KEY=         # For browser automation
+#   FAL_KEY=                     # For image generation
+#   TELEGRAM_BOT_TOKEN=          # For Telegram gateway
+#   DISCORD_BOT_TOKEN=           # For Discord gateway
+#   SLACK_BOT_TOKEN=             # For Slack gateway
+#
+# Copy .env.openviking.example to .env for a complete template
