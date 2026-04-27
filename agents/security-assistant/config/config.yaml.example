@@ -102,12 +102,19 @@ display:
   skin: "slate"
 
 # =============================================================================
-# 内存配置
+# 记忆系统配置（OpenViking）
 # =============================================================================
 memory:
-  # 建议启用内存，记录扫描历史、漏洞状态等
-  enabled: true
-  provider: "default"
+  # 使用 OpenViking 上下文数据库作为记忆后端
+  # 提供语义搜索、分层加载、自动记忆提取等增强能力
+  provider: openviking
+
+  # OpenViking 连接配置（也可通过环境变量设置）
+  openviking:
+    # endpoint: http://127.0.0.1:1933    # 默认，也可通过 OPENVIKING_ENDPOINT 设置
+    # account: default                    # 多租户账户 ID
+    # user: default                       # 账户内用户 ID
+    # agent: sechermes                    # 智能体 ID，建议与默认 hermes 区分
 
 # =============================================================================
 # 日志配置

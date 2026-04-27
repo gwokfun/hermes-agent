@@ -1,0 +1,79 @@
+# ===========================================================================
+# SecHermes Docker Compose
+# ===========================================================================
+# Brings up SecHermes + OpenViking with a single command:
+#
+#   cp .env.sechermes.example .env.sechermes
+#   # Edit .env.sechermes — fill in ANTHROPIC_API_KEY
+#   docker compose -f agents/security-assistant/docker-compose.yml up -d
+#
+# Optional: mount internal security docs
+#   docker compose -f agents/security-assistant/docker-compose.yml \
+#     -e SEC_DOCS_HOST_PATH=/path/to/your/docs up -d
+# ===========================================================================
+
+services:
+
+  # -------------------------------------------------------------------------
+  # OpenViking — context database / memory backend
+  # -------------------------------------------------------------------------
+  openviking:
+    image: volcengine/openviking:latest
+    container_name: sechermes-openviking
+    restart: unless-stopped
+    ports:
+      - "${OPENVIKING_PORT:-1933}:1933"
+    volumes:
+      - openviking-data:/root/.openviking
+    environment:
+      - OPENVIKING_HOST=0.0.0.0
+      - OPENVIKING_PORT=1933
+      - OPENVIKING_EMBEDDING_MODEL=${OPENVIKING_EMBEDDING_MODEL:-BAAI/bge-small-zh-v1.5}
+      - OPENVIKING_EMBEDDING_DEVICE=${OPENVIKING_EMBEDDING_DEVICE:-cpu}
+      - OPENVIKING_VLM_MODEL=${OPENVIKING_VLM_MODEL:-Qwen/Qwen2-VL-2B-Instruct}
+      - OPENVIKING_VLM_DEVICE=${OPENVIKING_VLM_DEVICE:-cpu}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:1933/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - sechermes-net
+
+  # -------------------------------------------------------------------------
+  # SecHermes — security assistant agent
+  # -------------------------------------------------------------------------
+  sechermes:
+    build:
+      context: ../..
+      dockerfile: agents/security-assistant/Dockerfile
+    image: sechermes:latest
+    container_name: sechermes-agent
+    restart: unless-stopped
+    env_file:
+      - .env.sechermes
+    environment:
+      # Override endpoint to use Docker networking
+      - OPENVIKING_ENDPOINT=http://openviking:1933
+    volumes:
+      - sechermes-data:/opt/data
+      # Mount security docs (read-only)
+      - ${SEC_DOCS_HOST_PATH:-/dev/null}:/opt/sec-docs:ro
+    depends_on:
+      openviking:
+        condition: service_healthy
+    stdin_open: true
+    tty: true
+    networks:
+      - sechermes-net
+
+volumes:
+  openviking-data:
+    driver: local
+  sechermes-data:
+    driver: local
+
+networks:
+  sechermes-net:
+    driver: bridge

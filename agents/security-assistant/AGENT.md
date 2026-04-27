@@ -14,6 +14,7 @@
 | 内部文档答疑 | Skill + 文件工具 | `skills/sec-docs-qa/SKILL.md` |
 | 安全产品自动修复（含审批） | Skill + MCP（审批 API） | `skills/sec-auto-fix/SKILL.md` |
 | 安全资讯情报分析 | Skill + Web 工具 | `skills/sec-intel/SKILL.md` |
+| 长期记忆（语义检索、自动提取） | OpenViking 插件 | `plugins/memory/openviking/` |
 
 ---
 
@@ -42,17 +43,22 @@
 │  │            Hermes 核心工具集                  │   │
 │  │  terminal │ file │ web │ mcp_client          │   │
 │  └──────────────────────────────────────────────┘   │
+│                                                      │
+│  ┌──────────────────────────────────────────────┐   │
+│  │          OpenViking 记忆系统                  │   │
+│  │  viking_search │ viking_read │ viking_browse │   │
+│  │  viking_remember │ viking_add_resource       │   │
+│  └──────────────────────────────────────────────┘   │
 └──────────────────────┬──────────────────────────────┘
-                       │ MCP / API 调用
-        ┌──────────────┼──────────────┐
-        │              │              │
-┌───────▼──────┐ ┌─────▼──────┐ ┌───▼──────────┐
-│  漏洞扫描    │ │  审批 API  │ │  CVE/NVD    │
-│  MCP Server  │ │  (远程审批) │ │  数据源      │
-│  (OpenVAS/  │ │            │ │  (MCP/HTTP) │
-│   Nessus/   │ └────────────┘ └─────────────┘
-│   自研)     │
-└─────────────┘
+                       │ MCP / API / HTTP
+     ┌─────────┬───────┼───────┬──────────┐
+     │         │       │       │          │
+┌────▼────┐ ┌──▼───┐ ┌─▼────┐ ┌▼────────┐ │
+│ 漏洞    │ │ 审批 │ │ CVE/ │ │OpenViking│ │
+│ 扫描    │ │ API  │ │ NVD  │ │ Server   │ │
+│ MCP     │ │      │ │ CISA │ │ :1933    │ │
+└─────────┘ └──────┘ └──────┘ └─────────┘ │
+                                           │
 ```
 
 ---
@@ -93,6 +99,7 @@ agents/security-assistant/
 | hermes-agent | ≥ v0.8.0 |
 | Python | ≥ 3.11 |
 | LLM 提供商 | Anthropic Claude / OpenRouter（推荐 claude-opus-4.6） |
+| OpenViking | 最新版（`pip install openviking`）+ httpx |
 | 网络访问 | 需访问 NVD / CISA KEV API（可配置代理） |
 
 ### 可选组件（按能力）

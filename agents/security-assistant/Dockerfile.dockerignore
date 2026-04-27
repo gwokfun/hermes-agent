@@ -1,0 +1,66 @@
+# SecHermes Docker build context filter
+# This file is used by Docker BuildKit when building with:
+#   agents/security-assistant/Dockerfile
+# (BuildKit reads <Dockerfile>.dockerignore automatically)
+
+# Git metadata
+.git
+.github
+.gitattributes
+.gitmodules
+.mailmap
+
+# Node / Playwright (not used by SecHermes)
+node_modules
+package-lock.json
+package.json
+web/
+website/
+
+# Tests
+tests/
+*.pyc
+__pycache__
+.pytest_cache
+.mypy_cache
+
+# RL training
+tinker-atropos/
+environments/
+datagen-config-examples/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker files (avoid recursive copy)
+docker/
+
+# Release notes
+RELEASE_v*.md
+
+# Plans
+plans/
+.plans/
+
+# Large files
+uv.lock
+*.egg-info
+dist/
+build/
+
+# Nix
+flake.lock
+flake.nix
+nix/
+
+# Env files (secrets — don't bake into image)
+.env
+.env.*
+!.env.example
+!.env.openviking.example
+
+# Venv
+.venv
+
+# IMPORTANT: Do NOT exclude *.md — SecHermes needs SOUL.md, AGENT.md, SKILL.md
